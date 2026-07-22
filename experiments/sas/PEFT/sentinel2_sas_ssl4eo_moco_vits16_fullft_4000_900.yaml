@@ -1,0 +1,126 @@
+# ============================================================
+# 4000 样本域外实验
+#
+# OOD 测试域：
+#   sas
+#
+# 训练域：
+#   cdl 1000
+#   eurocrops 1000
+#   nccm  1000
+#   SAct 2021   1000
+#
+# 总训练样本：
+#   4000
+#
+# 微调方式：
+#   冻结 SSL4EO-S12 MoCo ViT-S/16 主干；
+#   训练 LayerNorm、多尺度 Adapter、UNet Decoder 和分割头。
+# ============================================================
+
+seed_everything: 0
+
+trainer:
+  max_epochs: 100
+
+  accelerator: gpu
+  devices: 1
+
+  logger:
+    class_path: custom_loggers.wandb_explicit.WandbLoggerExplicit
+    init_args:
+      project: "sas-4000-900-FullFT"
+      name: "sas-4000-900-SSL4EO-MoCo-ViTS16-FullFT"
+      save_dir: "./outputs/sas/PEFT"
+      offline: false
+      log_model: false
+
+  check_val_every_n_epoch: 1
+  log_every_n_steps: 1
+
+  enable_checkpointing: true
+
+  default_root_dir: "./outputs/sas/PEFT/sas-4000-900-FullFT"
+
+  callbacks:
+    - class_path: lightning.pytorch.callbacks.ModelCheckpoint
+      init_args:
+        monitor: "val_average_F1-score"
+        mode: "max"
+        save_top_k: 1
+        save_last: true
+        filename: "epoch{epoch:02d}-val_f1{val_average_F1-score:.4f}"
+
+model:
+  class_path: trainers.ssl4eo_moco_vit_task.SSL4EOMoCoViTUNetTask
+
+  init_args:
+    checkpoint_path: "/home/hzm/.cache/torch/hub/checkpoints/ssl4eo/B13_vits16_moco_0099.pth"
+
+    image_size: 256
+
+    selected_blocks:
+      - 1
+      - 4
+      - 7
+      - 9
+      - 11
+
+    # 冻结 SSL4EO-S12 MoCo ViT-S/16 主干。
+    # 中间层 LayerNorm、Adapter、Decoder 和分割头仍然训练。
+    freeze_vit: false
+
+    in_channels: 13
+    num_classes: 6
+
+    loss: "ce"
+    ignore_index: 0
+
+    lr: 1.0e-3
+    patience: 1
+
+data:
+  class_path: datamodules.sentinel2_global_train_explicit.Sentinel2GlobalTrainExplicit
+
+  init_args:
+    batch_size: 64
+    patch_size: 256
+    num_workers: 8
+
+    sentinel2_paths: "./harmonized_global_crops/sentinel2_subsample_sas_2021_4000_900"
+
+    sentinel2_cache: false
+
+    sentinel2_bands:
+      - B01
+      - B02
+      - B03
+      - B04
+      - B05
+      - B06
+      - B07
+      - B08
+      - B8A
+      - B09
+      - B10
+      - B11
+      - B12
+
+    # 所有标签目录仍需声明。
+    # Sentinel2Global 会根据现有影像与对应标签求交，
+    # 因为训练影像目录中没有 CDL，所以 CDL 不会进入训练。
+    cdl_paths: "./harmonized_global_crops/cdl_harmonized_block"
+    cdl_years:
+      - 2023
+
+    eurocrops_paths: "./harmonized_global_crops/eurocrops_cropped_subsampled"
+
+    nccm_paths: "./harmonized_global_crops/nccm_harmonized_block"
+    nccm_years:
+      - 2019
+
+    sact_paths: "./harmonized_global_crops/sact_harmonized/train/labels"
+
+    sas_paths: "./harmonized_global_crops/sas_harmonized"
+    sas_years:
+      - 2021
