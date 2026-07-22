@@ -1,0 +1,106 @@
+# ============================================================
+# 4000 样本域外实验
+#
+# OOD 测试域：
+#   CDL 2023
+#
+# 训练域：
+#   EuroCrops 1000
+#   NCCM 2019  1000
+#   SACT 2017  1000
+#   SAS 2021   1000
+#
+# 总训练样本：
+#   4010
+#
+# 微调方式：全量微调
+# ============================================================
+
+seed_everything: 0
+
+trainer:
+  accelerator: gpu
+  devices: 1
+
+  max_epochs: 100
+  check_val_every_n_epoch: 1
+  log_every_n_steps: 20
+
+  enable_checkpointing: true
+
+  default_root_dir: "./outputs/cdl/PEFT/CDL-4000OOD_100ID-FullFT-test"
+
+  logger:
+    class_path: custom_loggers.wandb_explicit.WandbLoggerExplicit
+    init_args:
+      project: "CDL-4000OOD_100ID-FullFT-test"
+      name: "CDL-OOD-4000OOD_100ID-SSL4EO-MoCo-ViTS16-FullFT-test"
+      save_dir: "./outputs/cdl/PEFT"
+      offline: false
+      log_model: false
+
+  callbacks:
+    - class_path: lightning.pytorch.callbacks.ModelCheckpoint
+      init_args:
+        monitor: "val_average_F1-score"
+        mode: "max"
+        save_top_k: 1
+        save_last: true
+        filename: "epoch{epoch:02d}-val_f1{val_average_F1-score:.4f}"
+
+model:
+  class_path: trainers.ssl4eo_moco_vit_task.SSL4EOMoCoViTUNetTask
+
+  init_args:
+    checkpoint_path: "/home/hzm/.cache/torch/hub/checkpoints/ssl4eo/B13_vits16_moco_0099.pth"
+
+    image_size: 256
+
+    selected_blocks:
+      - 1
+      - 4
+      - 7
+      - 9
+      - 11
+
+    freeze_vit: false
+
+    in_channels: 13
+    num_classes: 6
+
+    loss: "ce"
+    ignore_index: 0
+
+    lr: 1.0e-3
+    patience: 1
+
+data:
+  class_path: datamodules.sentinel2_cdl_explicit.Sentinel2CDLExplicit
+
+  init_args:
+    batch_size: 64
+    patch_size: 256
+    num_workers: 2
+
+    cdl_paths: "./harmonized_global_crops/cdl_harmonized_block"
+    cdl_years:
+      - 2023
+
+    sentinel2_paths: "./harmonized_global_crops/sentinel2_subsample_test/sentinel2_cdl_2023_subsampled"
+
+    sentinel2_cache: false
+
+    sentinel2_bands:
+      - "B01"
+      - "B02"
+      - "B03"
+      - "B04"
+      - "B05"
+      - "B06"
+      - "B07"
+      - "B08"
+      - "B8A"
+      - "B09"
+      - "B10"
+      - "B11"
+      - "B12"
