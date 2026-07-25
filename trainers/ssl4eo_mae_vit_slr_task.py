@@ -1,4 +1,3 @@
-ssl4eo_mae_vit_slr_task.py
 """
 Lightning Task：SSL4EO-S12 MAE ViT-S/16 + GDA SLR 自监督域适配。
 """
@@ -9,13 +8,13 @@ import math
 from typing import Any
 
 import torch
-from lightning.pytorch import LightningModule
 from torch import Tensor
+from torchgeo.trainers import BaseTask
 
 from models.ssl4eo_mae_vit_slr import SSL4EOMAEViTSLR
 
 
-class SSL4EOMAEViTSLRTask(LightningModule):
+class SSL4EOMAEViTSLRTask(BaseTask):
     """训练 SSL4EO-S12 MAE ViT-S/16 中的 GDA SLR 参数。"""
 
     monitor = "val_loss"
@@ -43,8 +42,6 @@ class SSL4EOMAEViTSLRTask(LightningModule):
         min_lr: float = 0.0,
         warmup_epochs: int = 5,
     ) -> None:
-        super().__init__()
-
         if lr <= 0:
             raise ValueError("lr 必须大于 0。")
         if weight_decay < 0:
@@ -54,29 +51,78 @@ class SSL4EOMAEViTSLRTask(LightningModule):
         if warmup_epochs < 0:
             raise ValueError("warmup_epochs 不能小于 0。")
 
-        self.save_hyperparameters()
+        # BaseTask.__init__ 会依次执行：
+        # save_hyperparameters -> configure_models
+        # 因此必须先保存模型构建所需的非 hparams 属性。
+        self.ssl4eo_checkpoint_path = checkpoint_path
+        self.ssl4eo_image_size = int(image_size)
+        self.ssl4eo_in_channels = int(in_channels)
+        self.ssl4eo_patch_size = int(patch_size)
+        self.ssl4eo_mask_ratio = float(mask_ratio)
+        self.ssl4eo_slr_rank = int(slr_rank)
+        self.ssl4eo_slr_blocks = (
+            None
+            if slr_blocks is None
+            else tuple(int(index) for index in slr_blocks)
+        )
+        self.ssl4eo_patch_embed_adapter = bool(
+            patch_embed_adapter
+        )
+        self.ssl4eo_norm_trainable = bool(norm_trainable)
+        self.ssl4eo_train_cls_mask_tokens = bool(
+            train_cls_mask_tokens
+        )
+        self.ssl4eo_loss_on_all_patches = bool(
+            loss_on_all_patches
+        )
+        self.ssl4eo_norm_pix_loss = bool(norm_pix_loss)
+        self.ssl4eo_decoder_embed_dim = int(
+            decoder_embed_dim
+        )
+        self.ssl4eo_decoder_depth = int(decoder_depth)
+        self.ssl4eo_decoder_num_heads = int(
+            decoder_num_heads
+        )
+
+        # 必须继承 TorchGeo BaseTask，才能通过
+        # python -m torchgeo fit 的 model 类型检查。
+        super().__init__()
+
+    def configure_models(self) -> None:
+        """创建 SSL4EO MAE ViT-S/16 + GDA-SLR 模型。"""
 
         self.model = SSL4EOMAEViTSLR(
-            checkpoint_path=checkpoint_path,
-            image_size=image_size,
-            in_channels=in_channels,
-            patch_size=patch_size,
-            mask_ratio=mask_ratio,
-            slr_rank=slr_rank,
-            slr_blocks=slr_blocks,
-            patch_embed_adapter=patch_embed_adapter,
-            norm_trainable=norm_trainable,
-            train_cls_mask_tokens=train_cls_mask_tokens,
-            loss_on_all_patches=loss_on_all_patches,
-            norm_pix_loss=norm_pix_loss,
-            decoder_embed_dim=decoder_embed_dim,
-            decoder_depth=decoder_depth,
-            decoder_num_heads=decoder_num_heads,
+            checkpoint_path=self.ssl4eo_checkpoint_path,
+            image_size=self.ssl4eo_image_size,
+            in_channels=self.ssl4eo_in_channels,
+            patch_size=self.ssl4eo_patch_size,
+            mask_ratio=self.ssl4eo_mask_ratio,
+            slr_rank=self.ssl4eo_slr_rank,
+            slr_blocks=self.ssl4eo_slr_blocks,
+            patch_embed_adapter=(
+                self.ssl4eo_patch_embed_adapter
+            ),
+            norm_trainable=self.ssl4eo_norm_trainable,
+            train_cls_mask_tokens=(
+                self.ssl4eo_train_cls_mask_tokens
+            ),
+            loss_on_all_patches=(
+                self.ssl4eo_loss_on_all_patches
+            ),
+            norm_pix_loss=self.ssl4eo_norm_pix_loss,
+            decoder_embed_dim=(
+                self.ssl4eo_decoder_embed_dim
+            ),
+            decoder_depth=self.ssl4eo_decoder_depth,
+            decoder_num_heads=(
+                self.ssl4eo_decoder_num_heads
+            ),
         )
 
     @staticmethod
     def extract_images(batch: Any) -> Tensor:
         """从 TorchGeo 或普通 PyTorch batch 中提取影像。"""
+
         if isinstance(batch, Tensor):
             images = batch
 
@@ -91,6 +137,7 @@ class SSL4EOMAEViTSLRTask(LightningModule):
                 "inputs",
             ):
                 value = batch.get(key)
+
                 if isinstance(value, Tensor):
                     images = value
                     break
@@ -209,6 +256,7 @@ class SSL4EOMAEViTSLRTask(LightningModule):
 
     def configure_optimizers(self) -> dict[str, Any]:
         """AdamW + warmup/cosine 学习率。"""
+
         trainable_parameters = [
             parameter
             for parameter in self.parameters()
@@ -220,8 +268,10 @@ class SSL4EOMAEViTSLRTask(LightningModule):
 
         optimizer = torch.optim.AdamW(
             trainable_parameters,
-            lr=float(self.hparams.lr),
-            weight_decay=float(self.hparams.weight_decay),
+            lr=float(self.hparams["lr"]),
+            weight_decay=float(
+                self.hparams["weight_decay"]
+            ),
             betas=(0.9, 0.95),
         )
 
@@ -247,28 +297,35 @@ class SSL4EOMAEViTSLRTask(LightningModule):
                 total_steps = estimated
 
         steps_per_epoch = 1
+
         if trainer is not None:
             train_batches = getattr(
                 trainer,
                 "num_training_batches",
                 0,
             )
+
             if isinstance(train_batches, int):
                 steps_per_epoch = max(1, train_batches)
 
         warmup_steps = min(
             total_steps,
-            int(self.hparams.warmup_epochs)
+            int(self.hparams["warmup_epochs"])
             * steps_per_epoch,
         )
-        base_lr = float(self.hparams.lr)
-        min_lr = float(self.hparams.min_lr)
+        base_lr = float(self.hparams["lr"])
+        min_lr = float(self.hparams["min_lr"])
 
         def lr_lambda(step: int) -> float:
             if warmup_steps > 0 and step < warmup_steps:
-                return float(step + 1) / float(warmup_steps)
+                return float(step + 1) / float(
+                    warmup_steps
+                )
 
-            remaining = max(1, total_steps - warmup_steps)
+            remaining = max(
+                1,
+                total_steps - warmup_steps,
+            )
             progress = min(
                 1.0,
                 max(
@@ -306,32 +363,46 @@ class SSL4EOMAEViTSLRTask(LightningModule):
         checkpoint: dict[str, Any],
     ) -> None:
         """额外保存 SLR-only 权重，供下游监督阶段加载。"""
+
         checkpoint["slr_state_dict"] = (
             self.model.export_slr_state_dict()
         )
         checkpoint["slr_metadata"] = {
-            "backbone": "ssl4eo_s12_mae_vit_small_patch16",
-            "slr_rank": int(self.hparams.slr_rank),
-            "mask_ratio": float(self.hparams.mask_ratio),
-            "image_size": int(self.hparams.image_size),
-            "patch_size": int(self.hparams.patch_size),
-            "in_channels": int(self.hparams.in_channels),
+            "backbone": (
+                "ssl4eo_s12_mae_vit_small_patch16"
+            ),
+            "slr_rank": int(
+                self.hparams["slr_rank"]
+            ),
+            "mask_ratio": float(
+                self.hparams["mask_ratio"]
+            ),
+            "image_size": int(
+                self.hparams["image_size"]
+            ),
+            "patch_size": int(
+                self.hparams["patch_size"]
+            ),
+            "in_channels": int(
+                self.hparams["in_channels"]
+            ),
             "patch_embed_adapter": bool(
-                self.hparams.patch_embed_adapter
+                self.hparams["patch_embed_adapter"]
             ),
             "norm_trainable": bool(
-                self.hparams.norm_trainable
+                self.hparams["norm_trainable"]
             ),
             "train_cls_mask_tokens": bool(
-                self.hparams.train_cls_mask_tokens
+                self.hparams["train_cls_mask_tokens"]
             ),
             "loss_on_all_patches": bool(
-                self.hparams.loss_on_all_patches
+                self.hparams["loss_on_all_patches"]
             ),
         }
 
     def on_fit_start(self) -> None:
         """将参数统计写入日志。"""
+
         statistics = self.model.slr_statistics()
 
         for key, value in statistics.items():
