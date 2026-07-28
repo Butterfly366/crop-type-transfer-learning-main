@@ -1,0 +1,73 @@
+seed_everything: 0
+trainer:
+  max_steps: 10000
+  max_epochs: -1
+  accelerator: gpu
+  devices: 1
+  logger:
+    class_path: custom_loggers.wandb_explicit.WandbLoggerExplicit
+    init_args:
+      project: NCCM-900ID-SLR-MAE
+      name: NCCM-900ID-SSL4EO-MAE-ViTS16-SLR-r16-Pretrain
+      save_dir: ./outputs/nccm/PEFT/slr_mae
+      offline: false
+      log_model: false
+  check_val_every_n_epoch: 1
+  log_every_n_steps: 1
+  enable_checkpointing: true
+  default_root_dir: ./outputs/nccm/PEFT/slr_mae/900ID/ssl_pretrain
+  callbacks:
+  - class_path: lightning.pytorch.callbacks.ModelCheckpoint
+    init_args:
+      monitor: val_loss
+      mode: min
+      save_top_k: 1
+      save_last: true
+      filename: epoch{epoch:02d}-step{step}-val_loss{val_loss:.6f}
+model:
+  class_path: trainers.ssl4eo_mae_vit_slr_task.SSL4EOMAEViTSLRTask
+  init_args:
+    checkpoint_path: /home/hzm/.cache/torch/hub/checkpoints/ssl4eo/B13_vits16_mae_0099_ckpt.pth
+    image_size: 256
+    in_channels: 13
+    patch_size: 16
+    mask_ratio: 0.75
+    slr_rank: 16
+    slr_blocks: null
+    patch_embed_adapter: true
+    norm_trainable: true
+    train_cls_mask_tokens: true
+    loss_on_all_patches: true
+    norm_pix_loss: false
+    decoder_embed_dim: 512
+    decoder_depth: 8
+    decoder_num_heads: 16
+    lr: 0.0001
+    weight_decay: 0.05
+    min_lr: 0.0
+    warmup_epochs: 5
+data:
+  class_path: datamodules.sentinel2_nccm_explicit.Sentinel2NCCMExplicit
+  init_args:
+    batch_size: 32
+    patch_size: 256
+    num_workers: 12
+    nccm_paths: ./harmonized_global_crops/nccm_harmonized_block
+    nccm_years:
+    - 2019
+    sentinel2_paths: ./harmonized_global_crops/sentinel2_subsample_nccm_2019_900_ood/sentinel2_nccm_2019_subsampled
+    sentinel2_cache: false
+    sentinel2_bands:
+    - B01
+    - B02
+    - B03
+    - B04
+    - B05
+    - B06
+    - B07
+    - B08
+    - B8A
+    - B09
+    - B10
+    - B11
+    - B12
