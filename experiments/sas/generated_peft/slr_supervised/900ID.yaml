@@ -1,0 +1,78 @@
+seed_everything: 0
+trainer:
+  max_epochs: 100
+  accelerator: gpu
+  devices: 1
+  logger:
+    class_path: custom_loggers.wandb_explicit.WandbLoggerExplicit
+    init_args:
+      project: SAS-900ID-SLR-Supervised
+      name: SAS-900ID-SSL4EO-MAE-ViTS16-SLR-r16-UNet-Train
+      save_dir: ./outputs/sas/PEFT/slr_supervised
+      offline: false
+      log_model: false
+  check_val_every_n_epoch: 1
+  log_every_n_steps: 1
+  enable_checkpointing: true
+  default_root_dir: ./outputs/sas/PEFT/slr_supervised/900ID
+  callbacks:
+  - class_path: lightning.pytorch.callbacks.ModelCheckpoint
+    init_args:
+      monitor: val_average_F1-score
+      mode: max
+      save_top_k: 1
+      save_last: true
+      filename: epoch{epoch:02d}-val_f1{val_average_F1-score:.4f}
+      auto_insert_metric_name: false
+model:
+  class_path: trainers.ssl4eo_mae_vit_unet_slr_task.SSL4EOMAEViTUNetSLRTask
+  init_args:
+    checkpoint_path: /home/hzm/.cache/torch/hub/checkpoints/ssl4eo/B13_vits16_mae_0099_ckpt.pth
+    image_size: 256
+    selected_blocks:
+    - 1
+    - 4
+    - 7
+    - 9
+    - 11
+    slr_rank: 16
+    slr_blocks: null
+    patch_embed_adapter: true
+    norm_trainable: true
+    train_cls_token: true
+    slr_checkpoint_path: /home/hzm/hzm3/crop-type-transfer-learning-main/outputs/sas/PEFT/slr_mae/SAS-900ID-SLR-MAE/kz6ztz8r/checkpoints/epochepoch=358-stepstep=9334-val_lossval_loss=0.000239.ckpt
+    strict_slr_loading: true
+    in_channels: 13
+    num_classes: 6
+    loss: ce
+    class_weights: null
+    ignore_index: 0
+    lr: 0.0001
+    head_lr: 0.0005
+    weight_decay: 0.05
+    patience: 5
+data:
+  class_path: datamodules.sentinel2_sas_explicit.Sentinel2SASExplicit
+  init_args:
+    batch_size: 64
+    patch_size: 256
+    num_workers: 12
+    south_america_soybean_paths: ./harmonized_global_crops/sas_harmonized
+    south_america_soybean_years:
+    - 2021
+    sentinel2_paths: ./harmonized_global_crops/sentinel2_subsample_sas_2021_900_ood/sentinel2_sas_2021_subsampled
+    sentinel2_cache: false
+    sentinel2_bands:
+    - B01
+    - B02
+    - B03
+    - B04
+    - B05
+    - B06
+    - B07
+    - B08
+    - B8A
+    - B09
+    - B10
+    - B11
+    - B12
